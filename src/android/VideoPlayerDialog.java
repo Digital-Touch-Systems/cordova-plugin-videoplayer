@@ -230,7 +230,7 @@ public class VideoPlayerDialog extends Dialog {
         player.addVideoListener(new VideoListener() {
             @Override
             public void onVideoSizeChanged(int width, int height, int unappliedRotationDegrees, float pixelWidthHeightRatio) {
-                AspectRatioFrameLayout contentFrame = playerView.findViewById(com.google.android.exoplayer2.ui.R.id.exo_content_frame);
+                AspectRatioFrameLayout contentFrame = (AspectRatioFrameLayout) playerView.findViewById(com.google.android.exoplayer2.ui.R.id.exo_content_frame);
                 if (contentFrame.getResizeMode() == AspectRatioFrameLayout.RESIZE_MODE_FILL) {
                     float videoAspectRatio =
                             (height == 0 || width == 0) ? 1 : (width * pixelWidthHeightRatio) / height;
