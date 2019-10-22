@@ -13,8 +13,10 @@ import android.os.SystemClock;
 import android.support.annotation.NonNull;
 import android.support.annotation.Nullable;
 import android.util.Log;
+import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.Window;
 import android.view.WindowManager;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
@@ -54,7 +56,7 @@ import com.squareup.picasso.Picasso;
 import static com.google.android.exoplayer2.C.VIDEO_SCALING_MODE_SCALE_TO_FIT;
 import static com.google.android.exoplayer2.C.VIDEO_SCALING_MODE_SCALE_TO_FIT_WITH_CROPPING;
 
-public class VideoPlayerActivity extends Dialog {
+public class VideoPlayerDialog extends Dialog {
 
     private static final String TAG = "VideoPlayerActivity";
 
@@ -96,14 +98,15 @@ public class VideoPlayerActivity extends Dialog {
         }
     };
 
-    private Intent intent;
+    private Intent params;
 
 
-    public VideoPlayerActivity(@NonNull Activity activity, Intent intent) {
-        super(activity, android.R.style.Theme_DeviceDefault_Light_NoActionBar_Fullscreen);
+    public VideoPlayerDialog(@NonNull Activity activity, @NonNull Intent params) {
+        super(activity, android.R.style.Theme_NoTitleBar);
         setOwnerActivity(activity);
         setCancelable(true);
 
+        requestWindowFeature(Window.FEATURE_NO_TITLE);
         getWindow().setFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN, WindowManager.LayoutParams.FLAG_FULLSCREEN);
         getWindow().setBackgroundDrawableResource(android.R.color.transparent);
 
@@ -115,22 +118,24 @@ public class VideoPlayerActivity extends Dialog {
         lp.dimAmount = 0;
         getWindow().setAttributes(lp);
 
-        this.intent = intent;
-        determineMode(intent);
+        this.params = params;
+        determineMode(params);
 
         FrameLayout content = new FrameLayout(getContext());
         content.setId(android.R.id.content);
+        content.setMeasureAllChildren(true);
         setContentView(content, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
         imageView = new ImageView(getContext());
         imageView.setId(android.R.id.icon1);
-        content.addView(imageView, new FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
+        content.addView(imageView, new FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT, Gravity.CENTER));
 
         playerView = new PlayerView(getContext());
         playerView.setId(android.R.id.custom);
         playerView.setUseController(false);
+        playerView.setUseArtwork(false);
         playerView.setShutterBackgroundColor(Color.TRANSPARENT);
-        content.addView(playerView, new FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
+        content.addView(playerView, new FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT, Gravity.CENTER));
     }
 
     @Override
@@ -225,7 +230,26 @@ public class VideoPlayerActivity extends Dialog {
         player.addVideoListener(new VideoListener() {
             @Override
             public void onVideoSizeChanged(int width, int height, int unappliedRotationDegrees, float pixelWidthHeightRatio) {
-
+                AspectRatioFrameLayout contentFrame = playerView.findViewById(com.google.android.exoplayer2.ui.R.id.exo_content_frame);
+                if (contentFrame.getResizeMode() == AspectRatioFrameLayout.RESIZE_MODE_FILL) {
+                    float videoAspectRatio =
+                            (height == 0 || width == 0) ? 1 : (width * pixelWidthHeightRatio) / height;
+                    int viewHeight = playerView.getHeight();
+                    int viewWidth = playerView.getWidth();
+                    float viewAspectRatio = (float) width / height;
+                    float aspectDeformation = videoAspectRatio / viewAspectRatio - 1;
+                    if (aspectDeformation > 0) {
+                        viewWidth = (int) (viewHeight * videoAspectRatio);
+                    } else {
+                        viewHeight = (int) (viewWidth / videoAspectRatio);
+                    }
+                    ViewGroup.LayoutParams lp = contentFrame.getLayoutParams();
+                    lp.height = viewHeight;
+                    lp.width = viewWidth;
+                    contentFrame.setLayoutParams(lp);
+                } else {
+                    playerView.requestLayout();
+                }
             }
 
             @Override
@@ -241,7 +265,7 @@ public class VideoPlayerActivity extends Dialog {
             }
         });
 
-        onNewIntent(intent);
+        onNewIntent(params);
     }
 
     @NonNull
@@ -253,7 +277,7 @@ public class VideoPlayerActivity extends Dialog {
     }
 
     public void onNewIntent(Intent intent) {
-        this.intent = intent;
+        this.params = intent;
         if (determineMode(intent)) {
             handleIntent(intent);
         }
@@ -280,12 +304,12 @@ public class VideoPlayerActivity extends Dialog {
         }
 
         if (intent.getIntExtra(EXTRA_SCALING_MODE, MediaPlayer.VIDEO_SCALING_MODE_SCALE_TO_FIT) == MediaPlayer.VIDEO_SCALING_MODE_SCALE_TO_FIT_WITH_CROPPING) {
-            playerView.setResizeMode(AspectRatioFrameLayout.RESIZE_MODE_ZOOM);
             player.setVideoScalingMode(VIDEO_SCALING_MODE_SCALE_TO_FIT_WITH_CROPPING);
+            playerView.setResizeMode(AspectRatioFrameLayout.RESIZE_MODE_ZOOM);
             imageView.setScaleType(ImageView.ScaleType.CENTER_CROP);
         } else {
-            playerView.setResizeMode(AspectRatioFrameLayout.RESIZE_MODE_FIT);
             player.setVideoScalingMode(VIDEO_SCALING_MODE_SCALE_TO_FIT);
+            playerView.setResizeMode(AspectRatioFrameLayout.RESIZE_MODE_FILL);
             imageView.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
         }
 
@@ -334,6 +358,7 @@ public class VideoPlayerActivity extends Dialog {
         } else {
             imageView.bringToFront();
             playerView.setVisibility(View.VISIBLE);
+            // Will be hidden on first rendered frame.
 //            imageView.setVisibility(View.GONE);
             imageView.removeCallbacks(onPlaybackEnd);
 
@@ -383,7 +408,7 @@ public class VideoPlayerActivity extends Dialog {
      * Returns a new DataSource factory.
      *
      * @param useBandwidthMeter Whether to set {@link #BANDWIDTH_METER} as a listener to the new
-     *     DataSource factory.
+     *                          DataSource factory.
      * @return A new DataSource factory.
      */
     private DataSource.Factory buildDataSourceFactory(boolean useBandwidthMeter) {

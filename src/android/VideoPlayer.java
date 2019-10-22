@@ -25,14 +25,14 @@ public class VideoPlayer extends VideoPlayerOld {
 
     private CallbackContext callbackContext = null;
 
-    private VideoPlayerActivity dialog = null;
+    private VideoPlayerDialog dialog = null;
 
     /**
      * Executes the request and returns PluginResult.
      *
-     * @param action        The action to execute.
-     * @param args          JSONArray of arguments for the plugin.
-     * @return              A PluginResult object with a status and message.
+     * @param action The action to execute.
+     * @param args   JSONArray of arguments for the plugin.
+     * @return A PluginResult object with a status and message.
      */
     public boolean execute(final String action, final CordovaArgs args, final CallbackContext callbackContext) throws JSONException {
         if (USE_OLD_PLUGIN) {
@@ -66,15 +66,15 @@ public class VideoPlayer extends VideoPlayerOld {
                     }
                     Intent launchIntent = new Intent()
                             .setData(targetUri)
-                            .putExtra(VideoPlayerActivity.EXTRA_VOLUME, options.optString("volume", "1"))
-                            .putExtra(VideoPlayerActivity.EXTRA_SCALING_MODE, options.optInt("scalingMode", MediaPlayer.VIDEO_SCALING_MODE_SCALE_TO_FIT))
-                            .putExtra(VideoPlayerActivity.EXTRA_RESULT_RECEIVER, resultReceiver)
-                            .putExtra(VideoPlayerActivity.EXTRA_SHOW_IMAGE, "display".equals(action))
-                            .putExtra(VideoPlayerActivity.EXTRA_SHOW_IMAGE_DURATION, options.optLong("showImageDuration", -1))
+                            .putExtra(VideoPlayerDialog.EXTRA_VOLUME, options.optString("volume", "1"))
+                            .putExtra(VideoPlayerDialog.EXTRA_SCALING_MODE, options.optInt("scalingMode", MediaPlayer.VIDEO_SCALING_MODE_SCALE_TO_FIT))
+                            .putExtra(VideoPlayerDialog.EXTRA_RESULT_RECEIVER, resultReceiver)
+                            .putExtra(VideoPlayerDialog.EXTRA_SHOW_IMAGE, "display".equals(action))
+                            .putExtra(VideoPlayerDialog.EXTRA_SHOW_IMAGE_DURATION, options.optLong("showImageDuration", -1))
                             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                             .addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT);
                     if (dialog == null) {
-                        dialog = new VideoPlayerActivity(cordova.getActivity(), launchIntent);
+                        dialog = new VideoPlayerDialog(cordova.getActivity(), launchIntent);
                         dialog.show();
                     } else {
                         dialog.onNewIntent(launchIntent);
@@ -90,8 +90,7 @@ public class VideoPlayer extends VideoPlayerOld {
             }
 
             return true;
-        }
-        else if ("close".equals(action)) {
+        } else if ("close".equals(action)) {
             this.callbackContext = null;
 
             cordova.getActivity().runOnUiThread(new Runnable() {
@@ -127,13 +126,13 @@ public class VideoPlayer extends VideoPlayerOld {
             Log.e(LOG_TAG, "Got result[" + resultCode + "] error=" + (resultData == null ? null : resultData.getString("error")));
             CallbackContext callback = callbackContext;
             if (callback != null) {
-                if (resultCode == VideoPlayerActivity.RESULT_PLAYBACK_ENDED) {
+                if (resultCode == VideoPlayerDialog.RESULT_PLAYBACK_ENDED) {
                     PluginResult result = new PluginResult(PluginResult.Status.OK);
                     result.setKeepCallback(true);
                     callback.sendPluginResult(result);
                 } else {
                     PluginResult result;
-                    if (resultCode == VideoPlayerActivity.RESULT_FINISHING) {
+                    if (resultCode == VideoPlayerDialog.RESULT_FINISHING) {
                         result = new PluginResult(PluginResult.Status.OK);
                     } else {
                         String error = resultData == null ? null : resultData.getString("error");
