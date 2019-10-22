@@ -3,64 +3,35 @@ package com.moust.cordova.videoplayer;
 import android.app.Activity;
 import android.app.Dialog;
 import android.content.Intent;
-import android.graphics.Color;
+import android.content.res.AssetFileDescriptor;
 import android.media.MediaPlayer;
 import android.net.Uri;
 import android.os.Bundle;
-import android.os.Handler;
 import android.os.ResultReceiver;
 import android.os.SystemClock;
 import android.support.annotation.NonNull;
-import android.support.annotation.Nullable;
 import android.util.Log;
 import android.view.Gravity;
+import android.view.SurfaceHolder;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.Window;
 import android.view.WindowManager;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
+import android.widget.VideoView;
 
-import com.google.android.exoplayer2.C;
-import com.google.android.exoplayer2.ExoPlaybackException;
-import com.google.android.exoplayer2.ExoPlayerFactory;
-import com.google.android.exoplayer2.PlaybackParameters;
-import com.google.android.exoplayer2.Player;
-import com.google.android.exoplayer2.SimpleExoPlayer;
-import com.google.android.exoplayer2.Timeline;
-import com.google.android.exoplayer2.source.ExtractorMediaSource;
-import com.google.android.exoplayer2.source.MediaSource;
-import com.google.android.exoplayer2.source.MediaSourceEventListener;
-import com.google.android.exoplayer2.source.TrackGroupArray;
-import com.google.android.exoplayer2.source.dash.DashMediaSource;
-import com.google.android.exoplayer2.source.dash.DefaultDashChunkSource;
-import com.google.android.exoplayer2.source.hls.HlsMediaSource;
-import com.google.android.exoplayer2.source.smoothstreaming.DefaultSsChunkSource;
-import com.google.android.exoplayer2.source.smoothstreaming.SsMediaSource;
-import com.google.android.exoplayer2.trackselection.AdaptiveTrackSelection;
-import com.google.android.exoplayer2.trackselection.DefaultTrackSelector;
-import com.google.android.exoplayer2.trackselection.TrackSelection;
-import com.google.android.exoplayer2.trackselection.TrackSelectionArray;
-import com.google.android.exoplayer2.ui.AspectRatioFrameLayout;
-import com.google.android.exoplayer2.ui.PlayerView;
-import com.google.android.exoplayer2.upstream.DataSource;
-import com.google.android.exoplayer2.upstream.DefaultBandwidthMeter;
-import com.google.android.exoplayer2.upstream.DefaultDataSourceFactory;
-import com.google.android.exoplayer2.upstream.DefaultHttpDataSourceFactory;
-import com.google.android.exoplayer2.upstream.TransferListener;
-import com.google.android.exoplayer2.util.Util;
-import com.google.android.exoplayer2.video.VideoListener;
 import com.squareup.picasso.Callback;
 import com.squareup.picasso.Picasso;
+import com.squareup.picasso.RequestCreator;
 
-import static com.google.android.exoplayer2.C.VIDEO_SCALING_MODE_SCALE_TO_FIT;
-import static com.google.android.exoplayer2.C.VIDEO_SCALING_MODE_SCALE_TO_FIT_WITH_CROPPING;
+import java.io.IOException;
 
 public class VideoPlayerDialog extends Dialog {
 
     private static final String TAG = "VideoPlayerActivity";
 
-    private static final DefaultBandwidthMeter BANDWIDTH_METER = new DefaultBandwidthMeter();
+    private static final String ASSETS = "/android_asset/";
 
     public static final String EXTRA_VOLUME = "volume";
     public static final String EXTRA_SCALING_MODE = "scalingMode";
@@ -72,9 +43,8 @@ public class VideoPlayerDialog extends Dialog {
     public static final int RESULT_FINISHING = 2;
     public static final int RESULT_ERROR = 1;
 
-    private PlayerView playerView;
-    private SimpleExoPlayer player;
-    private DataSource.Factory mediaDataSourceFactory;
+    private VideoView playerView;
+    private MediaPlayer player;
 
     private ResultReceiver resultReceiver;
 
@@ -87,7 +57,13 @@ public class VideoPlayerDialog extends Dialog {
         @Override
         public void run() {
             if (player != null) {
-                player.stop(false);
+                try {
+                    if (player.isPlaying()) {
+                        player.stop();
+                    }
+                } catch (IllegalStateException e) {
+                    // ignore
+                }
             }
 
             if (resultReceiver != null) {
@@ -99,6 +75,20 @@ public class VideoPlayerDialog extends Dialog {
     };
 
     private Intent params;
+
+    /**
+     * Removes the "file://" prefix from the given URI string, if applicable.
+     * If the given URI string doesn't have a "file://" prefix, it is returned unchanged.
+     *
+     * @param uriString the URI string to operate on
+     * @return a path without the "file://" prefix
+     */
+    public static String stripFileProtocol(String uriString) {
+        if (uriString.startsWith("file://")) {
+            return Uri.parse(uriString).getPath();
+        }
+        return uriString;
+    }
 
 
     public VideoPlayerDialog(@NonNull Activity activity, @NonNull Intent params) {
@@ -130,11 +120,8 @@ public class VideoPlayerDialog extends Dialog {
         imageView.setId(android.R.id.icon1);
         content.addView(imageView, new FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT, Gravity.CENTER));
 
-        playerView = new PlayerView(getContext());
+        playerView = new VideoView(getContext());
         playerView.setId(android.R.id.custom);
-        playerView.setUseController(false);
-        playerView.setUseArtwork(false);
-        playerView.setShutterBackgroundColor(Color.TRANSPARENT);
         content.addView(playerView, new FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT, Gravity.CENTER));
     }
 
@@ -146,126 +133,68 @@ public class VideoPlayerDialog extends Dialog {
             hideImageTime = savedInstanceState.getLong("hideImageTime", SystemClock.elapsedRealtime());
         }
 
-        TrackSelection.Factory adaptiveTrackSelectionFactory = new AdaptiveTrackSelection.Factory(BANDWIDTH_METER);
-        player = ExoPlayerFactory.newSimpleInstance(getContext(), new DefaultTrackSelector(adaptiveTrackSelectionFactory));
-        player.setPlayWhenReady(true);
-        player.setRepeatMode(Player.REPEAT_MODE_OFF);
-        playerView.setPlayer(player);
-
-        mediaDataSourceFactory = buildDataSourceFactory(true);
-
-        player.addListener(new Player.EventListener() {
+        player = new MediaPlayer();
+        player.setOnPreparedListener(new MediaPlayer.OnPreparedListener() {
             @Override
-            public void onPlayerStateChanged(boolean playWhenReady, int playbackState) {
-                if (playWhenReady && playbackState == Player.STATE_READY) {
-                    // Active playback.
-                } else if (playWhenReady) {
-                    // Not playing because playback ended, the player is buffering, stopped or
-                    // failed. Check playbackState and player.getPlaybackError for details.
-                    if (playbackState == Player.STATE_ENDED && !showImage) {
-                        onPlaybackEnd.run();
-                    }
-                } else {
-                    // Paused by app.
+            public void onPrepared(MediaPlayer mp) {
+                if (!showImage) {
+                    imageView.postOnAnimationDelayed(new Runnable() {
+                        @Override
+                        public void run() {
+                            imageView.setVisibility(View.INVISIBLE);
+                        }
+                    }, 100);
+                    mp.start();
                 }
             }
-
+        });
+        player.setOnCompletionListener(new MediaPlayer.OnCompletionListener() {
             @Override
-            public void onPlayerError(ExoPlaybackException error) {
-                Log.e(TAG, "Playback error", error);
+            public void onCompletion(MediaPlayer mp) {
+                if (!showImage) {
+                    onPlaybackEnd.run();
+                }
+            }
+        });
+        player.setOnErrorListener(new MediaPlayer.OnErrorListener() {
+            @Override
+            public boolean onError(MediaPlayer mp, int what, int extra) {
+                String error = "MediaPlayer.onError(" + what + ", " + extra + ")";
+                Log.e(TAG, error);
 
                 if (!showImage) {
                     if (resultReceiver != null) {
                         Bundle resultData = new Bundle(1);
-                        resultData.putString("error", error.getLocalizedMessage());
+                        resultData.putString("error", error);
                         resultReceiver.send(RESULT_ERROR, resultData);
                         resultReceiver = null;
                     }
 
                     cancel();
                 }
-            }
-
-            @Override
-            public void onTimelineChanged(Timeline timeline, Object manifest, int reason) {
-
-            }
-
-            @Override
-            public void onTracksChanged(TrackGroupArray trackGroups, TrackSelectionArray trackSelections) {
-
-            }
-
-            @Override
-            public void onLoadingChanged(boolean isLoading) {
-
-            }
-
-            @Override
-            public void onRepeatModeChanged(int repeatMode) {
-
-            }
-
-            @Override
-            public void onShuffleModeEnabledChanged(boolean shuffleModeEnabled) {
-
-            }
-
-            @Override
-            public void onPositionDiscontinuity(int reason) {
-
-            }
-
-            @Override
-            public void onPlaybackParametersChanged(PlaybackParameters playbackParameters) {
-
-            }
-
-            @Override
-            public void onSeekProcessed() {
-
-            }
-        });
-
-        player.addVideoListener(new VideoListener() {
-            @Override
-            public void onVideoSizeChanged(int width, int height, int unappliedRotationDegrees, float pixelWidthHeightRatio) {
-                AspectRatioFrameLayout contentFrame = (AspectRatioFrameLayout) playerView.findViewById(com.google.android.exoplayer2.ui.R.id.exo_content_frame);
-                if (contentFrame.getResizeMode() == AspectRatioFrameLayout.RESIZE_MODE_FILL) {
-                    float videoAspectRatio =
-                            (height == 0 || width == 0) ? 1 : (width * pixelWidthHeightRatio) / height;
-                    int viewHeight = playerView.getHeight();
-                    int viewWidth = playerView.getWidth();
-                    float viewAspectRatio = (float) width / height;
-                    float aspectDeformation = videoAspectRatio / viewAspectRatio - 1;
-                    if (aspectDeformation > 0) {
-                        viewWidth = (int) (viewHeight * videoAspectRatio);
-                    } else {
-                        viewHeight = (int) (viewWidth / videoAspectRatio);
-                    }
-                    ViewGroup.LayoutParams lp = contentFrame.getLayoutParams();
-                    lp.height = viewHeight;
-                    lp.width = viewWidth;
-                    contentFrame.setLayoutParams(lp);
-                } else {
-                    playerView.requestLayout();
-                }
-            }
-
-            @Override
-            public void onRenderedFirstFrame() {
-                if (!showImage) {
-                    imageView.postOnAnimationDelayed(new Runnable() {
-                        @Override
-                        public void run() {
-                            imageView.setVisibility(View.GONE);
-                        }
-                    }, 100);
-                }
+                return false;
             }
         });
 
         onNewIntent(params);
+    }
+
+    private void preparePlayer() {
+        try {
+            player.prepareAsync();
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to prepare player", e);
+            if (!showImage) {
+                if (resultReceiver != null) {
+                    Bundle resultData = new Bundle(1);
+                    resultData.putString("error", e.getLocalizedMessage());
+                    resultReceiver.send(RESULT_ERROR, resultData);
+                    resultReceiver = null;
+                }
+
+                cancel();
+            }
+        }
     }
 
     @NonNull
@@ -303,41 +232,52 @@ public class VideoPlayerDialog extends Dialog {
             return;
         }
 
-        if (intent.getIntExtra(EXTRA_SCALING_MODE, MediaPlayer.VIDEO_SCALING_MODE_SCALE_TO_FIT) == MediaPlayer.VIDEO_SCALING_MODE_SCALE_TO_FIT_WITH_CROPPING) {
-            player.setVideoScalingMode(VIDEO_SCALING_MODE_SCALE_TO_FIT_WITH_CROPPING);
-            playerView.setResizeMode(AspectRatioFrameLayout.RESIZE_MODE_ZOOM);
-            imageView.setScaleType(ImageView.ScaleType.CENTER_CROP);
-        } else {
-            player.setVideoScalingMode(VIDEO_SCALING_MODE_SCALE_TO_FIT);
-            playerView.setResizeMode(AspectRatioFrameLayout.RESIZE_MODE_FILL);
-            imageView.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
-        }
-
         if (showImage) {
+            RequestCreator requestCreator = Picasso.get()
+                    .load(intent.getData())
+                    .noPlaceholder()
+                    .noFade();
+
+            if (intent.getIntExtra(EXTRA_SCALING_MODE, MediaPlayer.VIDEO_SCALING_MODE_SCALE_TO_FIT) == MediaPlayer.VIDEO_SCALING_MODE_SCALE_TO_FIT_WITH_CROPPING) {
+                imageView.setScaleType(ImageView.ScaleType.CENTER_CROP);
+            } else {
+                imageView.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
+            }
+
             if (skipPlaceholder) {
                 imageView.setVisibility(View.VISIBLE);
-                playerView.setVisibility(View.GONE);
-                player.stop(false);
-                Picasso.get()
-                        .load(intent.getData())
-                        .noPlaceholder()
-                        .noFade()
+                playerView.setVisibility(View.INVISIBLE);
+                if (player != null) {
+                    try {
+                        if (player.isPlaying()) {
+                            player.stop();
+                        }
+                    } catch (IllegalStateException e) {
+                        // ignore
+                    }
+                }
+                requestCreator
                         .into(imageView);
             } else {
                 playerView.bringToFront();
                 imageView.setVisibility(View.VISIBLE);
-                Picasso.get()
-                        .load(intent.getData())
-                        .noFade()
-                        .noPlaceholder()
+                requestCreator
                         .into(imageView, new Callback() {
                             @Override
                             public void onSuccess() {
                                 imageView.postOnAnimationDelayed(new Runnable() {
                                     @Override
                                     public void run() {
-                                        playerView.setVisibility(View.GONE);
-                                        player.stop(false);
+                                        playerView.setVisibility(View.INVISIBLE);
+                                        if (player != null) {
+                                            try {
+                                                if (player.isPlaying()) {
+                                                    player.stop();
+                                                }
+                                            } catch (IllegalStateException e) {
+                                                // ignore
+                                            }
+                                        }
                                     }
                                 }, 100);
                             }
@@ -347,8 +287,16 @@ public class VideoPlayerDialog extends Dialog {
                                 imageView.postOnAnimationDelayed(new Runnable() {
                                     @Override
                                     public void run() {
-                                        playerView.setVisibility(View.GONE);
-                                        player.stop(false);
+                                        playerView.setVisibility(View.INVISIBLE);
+                                        if (player != null) {
+                                            try {
+                                                if (player.isPlaying()) {
+                                                    player.stop();
+                                                }
+                                            } catch (IllegalStateException e) {
+                                                // ignore
+                                            }
+                                        }
                                     }
                                 }, 100);
                             }
@@ -356,11 +304,71 @@ public class VideoPlayerDialog extends Dialog {
             }
             imageView.postDelayed(onPlaybackEnd, Math.max(0, hideImageTime - SystemClock.elapsedRealtime()));
         } else {
+            if (player != null) {
+                try {
+                    if (player.isPlaying()) {
+                        player.stop();
+                    }
+                } catch (IllegalStateException e) {
+                    // ignore
+                }
+            }
+
+            if (player != null) {
+                try {
+                    player.reset();
+                } catch (IllegalStateException e) {
+                    // ignore
+                }
+            }
+
             imageView.bringToFront();
             playerView.setVisibility(View.VISIBLE);
             // Will be hidden on first rendered frame.
-//            imageView.setVisibility(View.GONE);
+//            imageView.setVisibility(View.INVISIBLE);
             imageView.removeCallbacks(onPlaybackEnd);
+
+            final String path = stripFileProtocol(intent.getData().toString());
+            if (path.startsWith(ASSETS)) {
+                String f = path.substring(15);
+                AssetFileDescriptor fd = null;
+                try {
+                    fd = getContext().getAssets().openFd(f);
+                    player.setDataSource(fd.getFileDescriptor(), fd.getStartOffset(), fd.getLength());
+                } catch (Exception ee) {
+                    Log.e(TAG, "Failed to prepare player", ee);
+                    if (resultReceiver != null) {
+                        Bundle resultData = new Bundle(1);
+                        resultData.putString("error", ee.getLocalizedMessage());
+                        resultReceiver.send(RESULT_ERROR, resultData);
+                        resultReceiver = null;
+                    }
+
+                    cancel();
+                    return;
+                }
+            } else {
+                try {
+                    player.setDataSource(path);
+                } catch (Exception eee) {
+                    Log.e(TAG, "Failed to prepare player", eee);
+                    if (resultReceiver != null) {
+                        Bundle resultData = new Bundle(1);
+                        resultData.putString("error", eee.getLocalizedMessage());
+                        resultReceiver.send(RESULT_ERROR, resultData);
+                        resultReceiver = null;
+                    }
+
+                    cancel();
+                    return;
+                }
+            }
+
+            if (intent.getIntExtra(EXTRA_SCALING_MODE, MediaPlayer.VIDEO_SCALING_MODE_SCALE_TO_FIT) == MediaPlayer.VIDEO_SCALING_MODE_SCALE_TO_FIT_WITH_CROPPING) {
+                player.setVideoScalingMode(MediaPlayer.VIDEO_SCALING_MODE_SCALE_TO_FIT_WITH_CROPPING);
+            } else {
+                player.setVideoScalingMode(MediaPlayer.VIDEO_SCALING_MODE_SCALE_TO_FIT);
+            }
 
             float volume = 1F;
             if (intent.hasExtra(EXTRA_VOLUME)) {
@@ -371,57 +379,49 @@ public class VideoPlayerDialog extends Dialog {
                     Log.e(TAG, "Invalid volume level: " + volumeStr);
                 }
             }
-            player.setVolume(volume);
-            player.prepare(buildMediaSource(intent.getData(), null, null));
-        }
-    }
+            player.setVolume(volume, volume);
 
-    private MediaSource buildMediaSource(
-            Uri uri,
-            @Nullable Handler handler,
-            @Nullable MediaSourceEventListener listener) {
-        @C.ContentType int type = Util.inferContentType(uri);
-        switch (type) {
-            case C.TYPE_DASH:
-                return new DashMediaSource.Factory(
-                        new DefaultDashChunkSource.Factory(mediaDataSourceFactory),
-                        buildDataSourceFactory(false))
-                        .createMediaSource(uri, handler, listener);
-            case C.TYPE_SS:
-                return new SsMediaSource.Factory(
-                        new DefaultSsChunkSource.Factory(mediaDataSourceFactory),
-                        buildDataSourceFactory(false))
-                        .createMediaSource(uri, handler, listener);
-            case C.TYPE_HLS:
-                return new HlsMediaSource.Factory(mediaDataSourceFactory)
-                        .createMediaSource(uri, handler, listener);
-            case C.TYPE_OTHER:
-                return new ExtractorMediaSource.Factory(mediaDataSourceFactory)
-                        .createMediaSource(uri, handler, listener);
-            default: {
-                throw new IllegalStateException("Unsupported type: " + type);
+            final SurfaceHolder mHolder = playerView.getHolder();
+            mHolder.setKeepScreenOn(true);
+            if (mHolder.getSurface() == null || !mHolder.getSurface().isValid()) {
+                mHolder.addCallback(new SurfaceHolder.Callback() {
+                    @Override
+                    public void surfaceCreated(SurfaceHolder holder) {
+                        Log.d(TAG, "Surface created");
+                        player.setDisplay(holder);
+                        preparePlayer();
+                        mHolder.removeCallback(this);
+                    }
+
+                    @Override
+                    public void surfaceDestroyed(SurfaceHolder holder) {
+                        Log.d(TAG, "Surface destroyed");
+                        mHolder.removeCallback(this);
+                    }
+
+                    @Override
+                    public void surfaceChanged(SurfaceHolder holder, int format, int width, int height) {
+                    }
+                });
+            } else {
+                Log.d(TAG, "Surface ready");
+                player.setDisplay(mHolder);
+                preparePlayer();
             }
         }
-    }
-
-    /**
-     * Returns a new DataSource factory.
-     *
-     * @param useBandwidthMeter Whether to set {@link #BANDWIDTH_METER} as a listener to the new
-     *                          DataSource factory.
-     * @return A new DataSource factory.
-     */
-    private DataSource.Factory buildDataSourceFactory(boolean useBandwidthMeter) {
-        TransferListener<? super DataSource> listener = useBandwidthMeter ? BANDWIDTH_METER : null;
-        return new DefaultDataSourceFactory(getContext().getApplicationContext(), listener,
-                new DefaultHttpDataSourceFactory(Util.getUserAgent(getContext(), "me.vandalko.videoplayer"), listener));
     }
 
     @Override
     protected void onStop() {
         super.onStop();
         if (player != null) {
-            player.setPlayWhenReady(false);
+            try {
+                if (player.isPlaying()) {
+                    player.stop();
+                }
+            } catch (IllegalStateException e) {
+                // ignore
+            }
             player.release();
         }
         if (imageView != null) {
