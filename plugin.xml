@@ -2,7 +2,7 @@
 <plugin xmlns="http://apache.org/cordova/ns/plugins/1.0"
     xmlns:android="http://schemas.android.com/apk/res/android"
     id="com.moust.cordova.videoplayer"
-    version="1.3.0">
+    version="1.2.8">
 
     <name>Video Player</name>
     <description>Native Video Player Plugin</description>
@@ -24,8 +24,10 @@
         </config-file>
 
         <source-file src="src/android/VideoPlayer.java" target-dir="src/com/moust/cordova/videoplayer" />
-        <source-file src="src/android/VideoPlayerActivity.java" target-dir="src/com/moust/cordova/videoplayer" />
+        <source-file src="src/android/VideoPlayerDialog.java" target-dir="src/com/moust/cordova/videoplayer" />
         <source-file src="src/android/VideoPlayerOld.java" target-dir="src/com/moust/cordova/videoplayer" />
+
+        <framework src="src/repositories.gradle" custom="true" type="gradleReference" />
 
         <framework src="com.google.android.exoplayer:exoplayer:2.7.3" />
         <framework src="com.squareup.picasso:picasso:2.71828" />
